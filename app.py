@@ -1,24 +1,31 @@
 from flask import Flask, request, jsonify
 import requests
+import os
 
 app = Flask(__name__)
 
-# >>> Trage hier deine echten Capital.com-API-Daten ein (niemals öffentlich teilen!) <<<
-API_KEY = "elvswWKiE4RmZ4Mt"
-API_PASS = "Daisy1234!"
+API_KEY = os.environ.get("CAPITALCOM_API_KEY")
+API_PASS = os.environ.get("CAPITALCOM_API_PASS")
 CAPITAL_COM_API_BASE = "https://api-capital.backend-capital.com"
+
+# <<< HIER: Deinen Epic festlegen (z.B. BTCUSD) >>>
+DEFAULT_EPIC = "BTCUSD"
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.json
     print("Webhook empfangen:", data)
     
-    # Auslesen der Parameter aus TradingView-Alert
-    signal = data.get("signal")
-    symbol = data.get("symbol", "BTC/USD")
-    volume = data.get("volume", 0.01)
+    # Werte aus TradingView Strategy Alert Message
+    signal = data.get("strategy_order_action")
+    contracts = data.get("strategy_order_contracts", 0.01)  # Standardvolumen
 
-    # Capital.com: Session/Login aufbauen
+    if not signal:
+        return jsonify({"error": "No 'strategy_order_action' in alert message"}), 400
+
+    epic = DEFAULT_EPIC
+
+    # Session/Login bei Capital.com
     s = requests.Session()
     login_res = s.post(
         CAPITAL_COM_API_BASE + "/api/v1/session",
@@ -31,17 +38,17 @@ def webhook():
     if login_res.status_code != 200:
         return jsonify({"error": "Login failed", "details": login_res.text}), 400
 
-    # Order vorbereiten
-    order_type = "BUY" if signal and signal.upper() == "BUY" else "SELL"
+    # Order-Daten zusammenstellen
+    order_type = "BUY" if signal.lower() == "buy" else "SELL"
     order_payload = {
-        "market": symbol,
+        "market": epic,
         "direction": order_type,
-        "size": volume,
+        "size": contracts,
         "orderType": "MARKET",
         "currencyCode": "USD"
     }
 
-    # Order senden
+    # Order an Capital.com senden
     order_res = s.post(
         CAPITAL_COM_API_BASE + "/api/v1/orders",
         json=order_payload,
