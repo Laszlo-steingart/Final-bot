@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import pyotp
+import traceback
 
 app = Flask(__name__)
 
@@ -15,50 +16,63 @@ DEFAULT_EPIC = "BTCUSD"
 def webhook():
     data = request.json
     print("Webhook empfangen:", data)
-    
-    signal = data.get("strategy_order_action")
-    contracts = data.get("strategy_order_contracts", 0.01)
 
-    if not signal:
-        return jsonify({"error": "No 'strategy_order_action' in alert message"}), 400
+    try:
+        signal = data.get("strategy_order_action")
+        contracts = data.get("strategy_order_contracts", 0.01)
+        if not signal:
+            print("ERROR: Kein strategy_order_action im Alert")
+            return jsonify({"error": "No 'strategy_order_action' in alert message"}), 400
 
-    epic = DEFAULT_EPIC
+        epic = DEFAULT_EPIC
 
-    # >>> 2FA TOTP generieren
-    totp = pyotp.TOTP(CAPITALCOM_2FA_SECRET)
-    one_time_passcode = totp.now()
+        # 2FA TOTP generieren
+        totp = pyotp.TOTP(CAPITALCOM_2FA_SECRET)
+        one_time_passcode = totp.now()
 
-    # Session/Login bei Capital.com mit Username & 2FA
-    s = requests.Session()
-    login_res = s.post(
-        CAPITAL_COM_API_BASE + "/api/v1/session",
-        json={
+        # Login an Capital.com mit Username und 2FA
+        s = requests.Session()
+        login_payload = {
             "identifier": CAPITALCOM_USERNAME,
             "password": API_PASS,
             "oneTimePasscode": one_time_passcode
         }
-    )
-    if login_res.status_code != 200:
-        return jsonify({"error": "Login failed", "details": login_res.text}), 400
+        print("Login-Payload:", login_payload)
+        login_res = s.post(
+            CAPITAL_COM_API_BASE + "/api/v1/session",
+            json=login_payload
+        )
+        print("Login-Status:", login_res.status_code)
+        print("Login-Response:", login_res.text)
 
-    order_type = "BUY" if signal.lower() == "buy" else "SELL"
-    order_payload = {
-        "market": epic,
-        "direction": order_type,
-        "size": contracts,
-        "orderType": "MARKET",
-        "currencyCode": "USD"
-    }
+        if login_res.status_code != 200:
+            return jsonify({"error": "Login failed", "details": login_res.text}), 400
 
-    order_res = s.post(
-        CAPITAL_COM_API_BASE + "/api/v1/orders",
-        json=order_payload
-    )
+        order_type = "BUY" if signal.lower() == "buy" else "SELL"
+        order_payload = {
+            "market": epic,
+            "direction": order_type,
+            "size": float(contracts),  # Stelle sicher, dass es float ist
+            "orderType": "MARKET",
+            "currencyCode": "USD"
+        }
+        print("Order-Payload:", order_payload)
+        order_res = s.post(
+            CAPITAL_COM_API_BASE + "/api/v1/orders",
+            json=order_payload
+        )
+        print("Order-Status:", order_res.status_code)
+        print("Order-Response:", order_res.text)
 
-    if order_res.status_code == 200:
-        return jsonify({"status": "Order placed", "order": order_res.json()}), 200
-    else:
-        return jsonify({"error": "Order failed", "details": order_res.text}), 400
+        if order_res.status_code == 200:
+            return jsonify({"status": "Order placed", "order": order_res.json()}), 200
+        else:
+            return jsonify({"error": "Order failed", "details": order_res.text}), 400
+
+    except Exception as e:
+        print("EXCEPTION:", str(e))
+        print(traceback.format_exc())
+        return jsonify({"error": "Exception", "details": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
