@@ -6,6 +6,7 @@ import traceback
 
 app = Flask(__name__)
 
+API_KEY = os.environ.get("CAPITALCOM_API_KEY")
 API_PASS = os.environ.get("CAPITALCOM_API_PASS")
 CAPITALCOM_2FA_SECRET = os.environ.get("CAPITALCOM_2FA_SECRET")
 CAPITALCOM_USERNAME = os.environ.get("CAPITALCOM_USERNAME")
@@ -30,17 +31,21 @@ def webhook():
         totp = pyotp.TOTP(CAPITALCOM_2FA_SECRET)
         one_time_passcode = totp.now()
 
-        # Login an Capital.com mit Username und 2FA
+        # Login an Capital.com mit Username, Passwort, 2FA, API-Key
         s = requests.Session()
         login_payload = {
             "identifier": CAPITALCOM_USERNAME,
             "password": API_PASS,
             "oneTimePasscode": one_time_passcode
         }
+        login_headers = {
+            "X-CAP-API-KEY": API_KEY
+        }
         print("Login-Payload:", login_payload)
         login_res = s.post(
             CAPITAL_COM_API_BASE + "/api/v1/session",
-            json=login_payload
+            json=login_payload,
+            headers=login_headers
         )
         print("Login-Status:", login_res.status_code)
         print("Login-Response:", login_res.text)
@@ -52,14 +57,18 @@ def webhook():
         order_payload = {
             "market": epic,
             "direction": order_type,
-            "size": float(contracts),  # Stelle sicher, dass es float ist
+            "size": float(contracts),
             "orderType": "MARKET",
             "currencyCode": "USD"
+        }
+        order_headers = {
+            "X-CAP-API-KEY": API_KEY
         }
         print("Order-Payload:", order_payload)
         order_res = s.post(
             CAPITAL_COM_API_BASE + "/api/v1/orders",
-            json=order_payload
+            json=order_payload,
+            headers=order_headers
         )
         print("Order-Status:", order_res.status_code)
         print("Order-Response:", order_res.text)
